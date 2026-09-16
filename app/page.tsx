@@ -1,10 +1,9 @@
 // @ts-nocheck
 "use client";
 
-// Ivideon Web SDK в Next.js: два плеера (клиент + склад) + панель управления
-// (скорость 1x/2x/4x/8x и перемотка ±5/±10 сек) — действует на ОБА плеера.
+// Ivideon Web SDK: два плеера (клиент + склад) + панель: скорость, перемотка,
+// синхронизация и включение звука по камерам. Управление — на оба плеера.
 // SDK: public/sdk/iv-standalone-web-sdk.js, .css, public/sdk/l10n/...
-//
 // URL: ?clientCamera=..&storeCamera=..&ts=<unix|мс|ISO>&token=..&apiHost=..&hmac=..&preroll=..&iw=..&ih=..
 
 import Script from "next/script";
@@ -46,9 +45,10 @@ function readConfig() {
   const ts = parseTsToUnixSeconds(p.get("ts"));
   return {
     shared,
+    // Обе со звуком, но стартуют в mute (звук включается кнопками).
     players: [
-      { cameraId: clientCamera, ts, sound: true,  muted: true,  label: "Клиентская зона (звук — по кнопке)" },
-      { cameraId: storeCamera,  ts, sound: false, muted: false, label: "Склад (без звука)" },
+      { cameraId: clientCamera, ts, sound: true, muted: true, label: "Клиентская зона" },
+      { cameraId: storeCamera,  ts, sound: true, muted: true, label: "Склад" },
     ],
   };
 }
@@ -57,13 +57,15 @@ export default function Page() {
   const [sdkLoaded, setSdkLoaded] = useState(false);
   const [status, setStatus] = useState("Загрузка SDK…");
   const [labels, setLabels] = useState(["Клиентская зона", "Склад"]);
-  const [controls, setControls] = useState(false); // показывать панель (режим архива)
+  const [controls, setControls] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const [audioOn, setAudioOn] = useState(-1); // индекс камеры со звуком, -1 = нет
 
   const refs = [useRef(null), useRef(null)];
   const startedRef = useRef(false);
   const playersRef = useRef([]);
   const speedRef = useRef(1);
+  const audioRef = useRef(-1);
 
   useEffect(() => {
     if (!sdkLoaded || startedRef.current) return;
@@ -136,14 +138,36 @@ export default function Page() {
     });
   }
 
-  const box = { width: "100%", background: "#000", borderRadius: 10, overflow: "hidden" };
+  // storeCamera (2-й) -> на текущее время clientCamera (1-й)
+  function syncStoreToClient() {
+    const client = playersRef.current[0];
+    const store = playersRef.current[1];
+    if (!client || !store) return;
+    const t = typeof client.getPlayheadTime === "function" ? client.getPlayheadTime() : 0;
+    if (t) store.playArchive({ startTime: t, speed: speedRef.current });
+  }
 
+  // Включить звук у камеры i (соло: остальные глушим). Повторный клик — выключить.
+  function toggleAudio(i) {
+    const next = audioRef.current === i ? -1 : i;
+    playersRef.current.forEach((p, idx) => {
+      const on = idx === next;
+      if (typeof p.setMuted === "function") p.setMuted(!on);
+      if (on && typeof p.setVolume === "function") p.setVolume(1);
+    });
+    audioRef.current = next;
+    setAudioOn(next);
+  }
+
+  const box = { width: "100%", background: "#000", borderRadius: 10, overflow: "hidden" };
   const btn = {
     padding: "8px 10px", border: "1px solid #d98a24", borderRadius: 8, cursor: "pointer",
     background: "#f2a33c", color: "#1a1205", font: "600 13px/1 -apple-system, sans-serif",
   };
   const btnGhost = { ...btn, background: "#1d232c", color: "#dfe4ea", borderColor: "#3a4453" };
   const speedBtn = (x) => (x === speed ? btn : btnGhost);
+  const audioBtn = (i) => (audioOn === i ? btn : btnGhost);
+  const divider = <span style={{ width: 1, alignSelf: "stretch", background: "#262d38", margin: "0 2px" }} />;
 
   return (
       <main style={{ fontFamily: "sans-serif", padding: 16, maxWidth: 1600 }}>
@@ -169,24 +193,30 @@ export default function Page() {
           ))}
         </div>
 
-        {/* Плавающая панель управления — правый нижний угол, поверх контента */}
+        {/* Плавающая панель управления — снизу по центру, поверх контента */}
         {controls && (
-            <div style={{
-              position: "fixed", bottom: 16, width: '100%', zIndex: 2147483647, display: "flex", justifyContent: "center"
-            }}>
-              <div
-               style={{
-                 display: "flex", alignItems: "center", gap: 8, padding: 10,
-                 background: "rgba(15,18,22,0.92)", border: "1px solid #262d38", borderRadius: 12,
-                 boxShadow: "0 8px 24px rgba(0,0,0,0.4)", backdropFilter: "blur(4px)",
-               }}
-              >
+            <div style={{ position: "fixed", bottom: 16, width: "100%", zIndex: 2147483647, display: "flex", justifyContent: "center" }}>
+              <div style={{
+                display: "flex", alignItems: "center", gap: 8, padding: 10, flexWrap: "wrap", justifyContent: "center",
+                background: "rgba(15,18,22,0.92)", border: "1px solid #262d38", borderRadius: 12,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.4)", backdropFilter: "blur(4px)",
+              }}>
+
+                <button style={audioBtn(0)} onClick={() => toggleAudio(0)} title="Звук клиентской зоны">🔊 Клиентская</button>
+                <button style={audioBtn(1)} onClick={() => toggleAudio(1)} title="Звук склада">🔊 Склад</button>
+
+                {divider}
+
+                <button style={btnGhost} onClick={syncStoreToClient} title="Склад → на время клиентской камеры">⟲ Синхронизировать</button>
+
+                {divider}
+
                 <button style={speedBtn(1)} onClick={() => applySpeed(1)}>1x</button>
                 <button style={speedBtn(2)} onClick={() => applySpeed(2)}>2x</button>
                 <button style={speedBtn(4)} onClick={() => applySpeed(4)}>4x</button>
                 <button style={speedBtn(8)} onClick={() => applySpeed(8)}>8x</button>
 
-                <span style={{ width: 1, alignSelf: "stretch", background: "#262d38", margin: "0 2px" }} />
+                {divider}
 
                 <button style={btnGhost} onClick={() => applySkip(-10)} title="Назад 10с">⏪ 10с</button>
                 <button style={btnGhost} onClick={() => applySkip(-5)} title="Назад 5с">⏪ 5с</button>
