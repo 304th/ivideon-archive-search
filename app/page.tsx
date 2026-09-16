@@ -157,7 +157,7 @@ export default function Page() {
                 onLoad={() => setSdkLoaded(true)}
                 onError={() => setStatus("Не удалось загрузить /sdk/iv-standalone-web-sdk.js")} />
 
-        <h1 style={{ fontSize: 16 }}>Ivideon Web SDK — два плеера</h1>
+        <h1 style={{ fontSize: 16 }}>Архивный поиск поступлений</h1>
         <div style={{ fontFamily: "monospace", color: "#666", marginBottom: 12 }}>{status}</div>
 
         <div className="iv-grid">
